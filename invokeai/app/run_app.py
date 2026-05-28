@@ -36,6 +36,12 @@ def run_app() -> None:
     if app_config.pytorch_cuda_alloc_conf:
         configure_torch_cuda_allocator(app_config.pytorch_cuda_alloc_conf, logger)
 
+    # Configure Apple Silicon / MPS environment variables. No-op off macOS.
+    # NOTE: It is important that this happens before torch is imported.
+    from invokeai.app.util.torch_mps_setup import configure_torch_mps
+
+    configure_torch_mps(app_config.mps_enable_fallback, app_config.mps_high_watermark_ratio, logger)
+
     # This import must happen after configure_torch_cuda_allocator() is called, because the module imports torch.
     from invokeai.app.invocations.baseinvocation import InvocationRegistry
     from invokeai.app.invocations.load_custom_nodes import load_custom_nodes

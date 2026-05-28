@@ -207,6 +207,10 @@ class InvokeAIAppConfig(BaseSettings):
     device:                      str = Field(default="auto",                description="Preferred execution device. `auto` will choose the device depending on the hardware platform and the installed torch capabilities.<br>Valid values: `auto`, `cpu`, `cuda`, `mps`, `cuda:N` (where N is a device number)", pattern=r"^(auto|cpu|mps|cuda(:\d+)?)$")
     precision:                PRECISION = Field(default="auto",             description="Floating point precision. `float16` will consume half the memory of `float32` but produce slightly lower-quality images. The `auto` setting will guess the proper precision based on your video card and operating system.")
 
+    # APPLE SILICON / MPS (no effect off macOS)
+    mps_enable_fallback:          bool = Field(default=True,                 description="On macOS (MPS), set PYTORCH_ENABLE_MPS_FALLBACK=1 so operations not implemented for the MPS backend fall back to CPU instead of raising an error. Improves robustness at the cost of a slow CPU path for those ops.")
+    mps_high_watermark_ratio: Optional[float] = Field(default=None, ge=0,    description="On macOS (MPS), sets PYTORCH_MPS_HIGH_WATERMARK_RATIO, which caps total MPS allocations as a ratio of recommended max memory. 0.0 disables the upper limit (use with caution on a shared-memory system). Leave unset to use the PyTorch default.")
+
     # GENERATION
     sequential_guidance:           bool = Field(default=False,              description="Whether to calculate guidance in serial instead of in parallel, lowering memory requirements.")
     attention_type:      ATTENTION_TYPE = Field(default="auto",             description="Attention type.")

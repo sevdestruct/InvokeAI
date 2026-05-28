@@ -681,6 +681,13 @@ class ModelCache:
                 max_ram_cache_size_bytes = int(self._max_vram_cache_size_gb * GB)
             else:
                 max_ram_cache_size_bytes = total_cuda_vram_bytes - int(self._execution_device_working_mem_gb * GB)
+        elif self._execution_device.type == "mps":
+            # Apple Silicon uses unified memory: the model cache "RAM" and the execution device "VRAM" are the same
+            # physical pool. The 32GB default is meant for discrete-GPU systems and leaves large amounts of unified
+            # memory unused on high-RAM Macs, forcing needless model reloads. Let heuristic 1 (50% of total RAM)
+            # govern instead, so more models can stay resident. This is only a ceiling -- memory is consumed lazily
+            # as models are actually loaded -- so raising it does not increase baseline usage.
+            max_ram_cache_size_bytes = max(max_ram_cache_size_bytes, ram_available_to_model_cache)
         if ram_available_to_model_cache > max_ram_cache_size_bytes:
             heuristics_applied.append(2)
             ram_available_to_model_cache = max_ram_cache_size_bytes
