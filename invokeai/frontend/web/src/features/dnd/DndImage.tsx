@@ -23,14 +23,20 @@ const sx = {
 type Props = {
   imageDTO: ImageDTO;
   asThumbnail?: boolean;
+  /** When false, native drag-and-drop is disabled (e.g. while the image is zoomed and being panned). */
+  canDrag?: boolean;
 } & ImageProps;
 
 export const DndImage = memo(
-  forwardRef(({ imageDTO, asThumbnail, ...rest }: Props, forwardedRef) => {
+  forwardRef(({ imageDTO, asThumbnail, canDrag = true, ...rest }: Props, forwardedRef) => {
     const [isDragging, setIsDragging] = useState(false);
     const ref = useRef<HTMLImageElement>(null);
     useImperativeHandle(forwardedRef, () => ref.current!, []);
     const [dragPreviewState, setDragPreviewState] = useState<DndDragPreviewSingleImageState | null>(null);
+
+    // Read in the draggable's canDrag callback so toggling does not re-subscribe.
+    const canDragRef = useRef(canDrag);
+    canDragRef.current = canDrag;
 
     useMiddleClickOpenInNewTab(ref, imageDTO.image_url);
 
@@ -43,6 +49,7 @@ export const DndImage = memo(
         firefoxDndFix(element),
         draggable({
           element,
+          canDrag: () => canDragRef.current,
           getInitialData: () => singleImageDndSource.getData({ imageDTO }, imageDTO.image_name),
           onDragStart: () => {
             setIsDragging(true);

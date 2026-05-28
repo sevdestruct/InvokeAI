@@ -23,6 +23,7 @@ import { useImageViewerContext } from './context';
 import { NoContentForViewer } from './NoContentForViewer';
 import { ProgressImage } from './ProgressImage2';
 import { ProgressIndicator } from './ProgressIndicator2';
+import { useImageZoomPan } from './useImageZoomPan';
 
 export const CurrentImagePreview = memo(({ imageDTO }: { imageDTO: ImageDTO | null }) => {
   const activeTab = useAppSelector(selectActiveTab);
@@ -135,6 +136,8 @@ export const CurrentImagePreview = memo(({ imageDTO }: { imageDTO: ImageDTO | nu
 
   const withProgress = shouldShowProgressInViewer && progressImage !== null;
 
+  const zoom = useImageZoomPan(imageToRender?.image_name);
+
   return (
     <Flex
       onMouseOver={onMouseOver}
@@ -146,9 +149,19 @@ export const CurrentImagePreview = memo(({ imageDTO }: { imageDTO: ImageDTO | nu
       position="relative"
     >
       {imageToRender && (
-        <Flex w="full" h="full" position="absolute" alignItems="center" justifyContent="center">
-          <DndImage imageDTO={imageToRender} onLoad={onLoadImage} borderRadius="base" />
-        </Flex>
+        <div
+          ref={zoom.containerRef}
+          style={zoom.containerStyle}
+          onPointerDown={zoom.onPointerDown}
+          onPointerMove={zoom.onPointerMove}
+          onPointerUp={zoom.onPointerUp}
+          onPointerCancel={zoom.onPointerUp}
+          onDoubleClick={zoom.onDoubleClick}
+        >
+          <div style={zoom.contentStyle}>
+            <DndImage imageDTO={imageToRender} onLoad={onLoadImage} borderRadius="base" canDrag={!zoom.isZoomed} />
+          </div>
+        </div>
       )}
       {!imageToRender && <NoContentForViewer />}
       {withProgress && (
