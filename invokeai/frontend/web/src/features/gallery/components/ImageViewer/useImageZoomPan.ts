@@ -148,6 +148,7 @@ export const useImageZoomPan = (resetKey?: string) => {
       justifyContent: 'center',
       overflow: 'hidden',
       touchAction: 'none',
+      outline: 'none',
       cursor: isZoomed ? 'grab' : 'default',
     }),
     [isZoomed]

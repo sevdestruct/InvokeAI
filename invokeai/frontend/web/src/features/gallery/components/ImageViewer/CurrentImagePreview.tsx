@@ -16,6 +16,7 @@ import {
 } from 'features/ui/store/uiSelectors';
 import type { AnimationProps } from 'framer-motion';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ImageDTO } from 'services/api/types';
 
@@ -138,6 +139,44 @@ export const CurrentImagePreview = memo(({ imageDTO }: { imageDTO: ImageDTO | nu
 
   const zoom = useImageZoomPan(imageToRender?.image_name);
 
+  // Focus the viewer (unless the user is typing) so it can receive arrow-key navigation.
+  const focusViewer = useCallback(() => {
+    const el = zoom.containerRef.current;
+    if (!el) {
+      return;
+    }
+    const active = document.activeElement;
+    const isTyping =
+      active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      (active instanceof HTMLElement && active.isContentEditable);
+    if (!isTyping) {
+      el.focus({ preventScroll: true });
+    }
+  }, [zoom.containerRef]);
+
+  // When the viewer is focused, left/right arrows go to the previous/next image. We stop the native
+  // event so the global gallery hotkeys (2D grid navigation) don't also fire.
+  const onViewerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      if (isFetching) {
+        return;
+      }
+      if (event.key === 'ArrowLeft') {
+        goToPreviousImage();
+      } else {
+        goToNextImage();
+      }
+    },
+    [goToNextImage, goToPreviousImage, isFetching]
+  );
+
   return (
     <Flex
       onMouseOver={onMouseOver}
@@ -152,6 +191,9 @@ export const CurrentImagePreview = memo(({ imageDTO }: { imageDTO: ImageDTO | nu
         <div
           ref={zoom.containerRef}
           style={zoom.containerStyle}
+          tabIndex={0}
+          onKeyDown={onViewerKeyDown}
+          onMouseEnter={focusViewer}
           onPointerDown={zoom.onPointerDown}
           onPointerMove={zoom.onPointerMove}
           onPointerUp={zoom.onPointerUp}
