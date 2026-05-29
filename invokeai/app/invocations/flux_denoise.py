@@ -29,6 +29,7 @@ from invokeai.app.invocations.ip_adapter import IPAdapterField
 from invokeai.app.invocations.latent_noise import validate_noise_tensor_shape
 from invokeai.app.invocations.model import ControlLoRAField, LoRAField, TransformerField, VAEField
 from invokeai.app.invocations.primitives import LatentsOutput
+from invokeai.app.services.config.config_default import get_config
 from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.backend.flux.controlnet.instantx_controlnet_flux import InstantXControlNetFlux
 from invokeai.backend.flux.controlnet.xlabs_controlnet_flux import XLabsControlNetFlux
@@ -45,6 +46,7 @@ from invokeai.backend.flux.extensions.kontext_extension import KontextExtension
 from invokeai.backend.flux.extensions.regional_prompting_extension import RegionalPromptingExtension
 from invokeai.backend.flux.extensions.xlabs_controlnet_extension import XLabsControlNetExtension
 from invokeai.backend.flux.extensions.xlabs_ip_adapter_extension import XLabsIPAdapterExtension
+from invokeai.backend.flux.first_block_cache import apply_first_block_cache
 from invokeai.backend.flux.ip_adapter.xlabs_ip_adapter_flux import XlabsIpAdapterFlux
 from invokeai.backend.flux.model import Flux
 from invokeai.backend.flux.sampling_utils import (
@@ -500,26 +502,29 @@ class FluxDenoiseInvocation(BaseInvocation):
             else:
                 context.logger.debug(f"DyPE disabled: resolution={self.width}x{self.height}, preset={self.dype_preset}")
 
-            x = denoise(
-                model=transformer,
-                img=x,
-                img_ids=img_ids,
-                pos_regional_prompting_extension=pos_regional_prompting_extension,
-                neg_regional_prompting_extension=neg_regional_prompting_extension,
-                timesteps=timesteps,
-                step_callback=self._build_step_callback(context),
-                guidance=self.guidance,
-                cfg_scale=cfg_scale,
-                inpaint_extension=inpaint_extension,
-                controlnet_extensions=controlnet_extensions,
-                pos_ip_adapter_extensions=pos_ip_adapter_extensions,
-                neg_ip_adapter_extensions=neg_ip_adapter_extensions,
-                img_cond=img_cond,
-                img_cond_seq=img_cond_seq,
-                img_cond_seq_ids=img_cond_seq_ids,
-                dype_extension=dype_extension,
-                scheduler=scheduler,
-            )
+            # FLUX FirstBlockCache (opt-in via config; no-op at threshold 0.0). Attaches a
+            # per-run residual cache to the transformer for the duration of the denoise loop.
+            with apply_first_block_cache(transformer, get_config().flux_first_block_cache_threshold):
+                x = denoise(
+                    model=transformer,
+                    img=x,
+                    img_ids=img_ids,
+                    pos_regional_prompting_extension=pos_regional_prompting_extension,
+                    neg_regional_prompting_extension=neg_regional_prompting_extension,
+                    timesteps=timesteps,
+                    step_callback=self._build_step_callback(context),
+                    guidance=self.guidance,
+                    cfg_scale=cfg_scale,
+                    inpaint_extension=inpaint_extension,
+                    controlnet_extensions=controlnet_extensions,
+                    pos_ip_adapter_extensions=pos_ip_adapter_extensions,
+                    neg_ip_adapter_extensions=neg_ip_adapter_extensions,
+                    img_cond=img_cond,
+                    img_cond_seq=img_cond_seq,
+                    img_cond_seq_ids=img_cond_seq_ids,
+                    dype_extension=dype_extension,
+                    scheduler=scheduler,
+                )
 
         x = unpack(x.float(), self.height, self.width)
         return x

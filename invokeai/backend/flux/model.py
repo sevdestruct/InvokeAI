@@ -12,6 +12,7 @@ from invokeai.backend.flux.custom_block_processor import (
 )
 from invokeai.backend.flux.extensions.regional_prompting_extension import RegionalPromptingExtension
 from invokeai.backend.flux.extensions.xlabs_ip_adapter_extension import XLabsIPAdapterExtension
+from invokeai.backend.flux.first_block_cache import FluxFirstBlockCache
 from invokeai.backend.flux.modules.layers import (
     DoubleStreamBlock,
     EmbedND,
@@ -119,6 +120,29 @@ class Flux(nn.Module):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
 
+        # FLUX FirstBlockCache: when enabled (and no per-block residual injection is active),
+        # the first double-stream block's residual decides whether the remaining blocks can be
+        # skipped and a cached aggregate residual reused. ControlNet / IP-Adapter inject into
+        # individual blocks, so they are incompatible with skipping and fall through below.
+        fbcache: FluxFirstBlockCache | None = getattr(self, "_fbcache", None)
+        if (
+            fbcache is not None
+            and controlnet_double_block_residuals is None
+            and controlnet_single_block_residuals is None
+            and not ip_adapter_extensions
+        ):
+            return self._forward_with_first_block_cache(
+                fbcache=fbcache,
+                img=img,
+                txt=txt,
+                vec=vec,
+                pe=pe,
+                timestep_index=timestep_index,
+                total_num_timesteps=total_num_timesteps,
+                ip_adapter_extensions=ip_adapter_extensions,
+                regional_prompting_extension=regional_prompting_extension,
+            )
+
         # Validate double_block_residuals shape.
         if controlnet_double_block_residuals is not None:
             assert len(controlnet_double_block_residuals) == len(self.double_blocks)
@@ -163,6 +187,92 @@ class Flux(nn.Module):
                 img[:, txt.shape[1] :, ...] += controlnet_single_block_residuals[block_index]
 
         img = img[:, txt.shape[1] :, ...]
+
+        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+        return img
+
+    def _forward_with_first_block_cache(
+        self,
+        fbcache: FluxFirstBlockCache,
+        img: Tensor,
+        txt: Tensor,
+        vec: Tensor,
+        pe: Tensor,
+        timestep_index: int,
+        total_num_timesteps: int,
+        ip_adapter_extensions: list[XLabsIPAdapterExtension],
+        regional_prompting_extension: RegionalPromptingExtension,
+    ) -> Tensor:
+        """FirstBlockCache variant of the block stack (see first_block_cache.py).
+
+        Always runs the first double-stream block, then either reuses the cached aggregate
+        residual (when the first block barely changed vs. the previous step) or recomputes
+        the remaining double + single blocks and refreshes the cache.
+        """
+        # Keep cache state separate per conditioning stream (positive vs. negative under CFG).
+        stream_key = id(regional_prompting_extension)
+
+        # Always run the first double-stream block.
+        original_img = img
+        first_block = self.double_blocks[0]
+        assert isinstance(first_block, DoubleStreamBlock)
+        img, txt = CustomDoubleStreamBlockProcessor.custom_double_block_forward(
+            timestep_index=timestep_index,
+            total_num_timesteps=total_num_timesteps,
+            block_index=0,
+            block=first_block,
+            img=img,
+            txt=txt,
+            vec=vec,
+            pe=pe,
+            ip_adapter_extensions=ip_adapter_extensions,
+            regional_prompting_extension=regional_prompting_extension,
+        )
+        first_block_residual = img - original_img
+
+        cached_residual = fbcache.get_cached_residual(stream_key)
+        if cached_residual is not None and fbcache.should_reuse(stream_key, first_block_residual):
+            # First block barely changed vs. the previous step -> skip every remaining block
+            # and reuse the cached aggregate residual.
+            img = img + cached_residual
+        else:
+            # Recompute the remaining blocks and refresh the cached aggregate residual. The
+            # residual is measured in img-token space, before/after the rest of the stack.
+            img_after_first_block = img
+            for block_index in range(1, len(self.double_blocks)):
+                block = self.double_blocks[block_index]
+                assert isinstance(block, DoubleStreamBlock)
+                img, txt = CustomDoubleStreamBlockProcessor.custom_double_block_forward(
+                    timestep_index=timestep_index,
+                    total_num_timesteps=total_num_timesteps,
+                    block_index=block_index,
+                    block=block,
+                    img=img,
+                    txt=txt,
+                    vec=vec,
+                    pe=pe,
+                    ip_adapter_extensions=ip_adapter_extensions,
+                    regional_prompting_extension=regional_prompting_extension,
+                )
+
+            img = torch.cat((txt, img), 1)
+            for block_index, block in enumerate(self.single_blocks):
+                assert isinstance(block, SingleStreamBlock)
+                img = CustomSingleStreamBlockProcessor.custom_single_block_forward(
+                    timestep_index=timestep_index,
+                    total_num_timesteps=total_num_timesteps,
+                    block_index=block_index,
+                    block=block,
+                    img=img,
+                    vec=vec,
+                    pe=pe,
+                    regional_prompting_extension=regional_prompting_extension,
+                )
+            img = img[:, txt.shape[1] :, ...]
+
+            fbcache.store_residual(stream_key, img - img_after_first_block)
+
+        fbcache.update_first_residual(stream_key, first_block_residual)
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
         return img
