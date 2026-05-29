@@ -51,20 +51,6 @@ class _NoRegional:
         return None
 
 
-class CountingCache(FluxFirstBlockCache):
-    """FluxFirstBlockCache that tallies how many steps reused the cache (skipped blocks)."""
-
-    def __init__(self, threshold: float) -> None:
-        super().__init__(threshold)
-        self.reuse_count = 0
-
-    def should_reuse(self, stream_key: int, first_residual: torch.Tensor) -> bool:
-        result = super().should_reuse(stream_key, first_residual)
-        if result:
-            self.reuse_count += 1
-        return result
-
-
 def build_model() -> Flux:
     # Real schnell block counts; reduced hidden size for a fast random-weight test.
     params = FluxParams(
@@ -205,7 +191,7 @@ def main() -> None:
     base_img, base_t = run_trajectory(model, inputs, cache=None)
 
     # 2. Identity: cache attached, ~zero threshold -> never skips -> must match baseline.
-    ident_cache = CountingCache(threshold=1e-12)
+    ident_cache = FluxFirstBlockCache(threshold=1e-12)
     ident_img, _ = run_trajectory(model, inputs, cache=ident_cache)
     ident_err = rel_l2(base_img, ident_img)
     print("\n[1] No-regression identity (threshold~0, cache path runs full stack every step):")
@@ -215,7 +201,7 @@ def main() -> None:
 
     # 3a. Noisy walk (update_scale=1.0): residuals genuinely differ -> gate declines to skip.
     print("\n[2a] Skip gate on a noisy trajectory (residuals genuinely change every step):")
-    cache = CountingCache(threshold=0.4)
+    cache = FluxFirstBlockCache(threshold=0.4)
     run_trajectory(model, inputs, cache=cache, update_scale=1.0)
     print(f"    threshold=0.4  skips={cache.reuse_count}/{STEPS}  "
           "-> gate correctly does NOT skip when the trajectory is not coherent")

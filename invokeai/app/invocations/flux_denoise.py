@@ -504,7 +504,9 @@ class FluxDenoiseInvocation(BaseInvocation):
 
             # FLUX FirstBlockCache (opt-in via config; no-op at threshold 0.0). Attaches a
             # per-run residual cache to the transformer for the duration of the denoise loop.
-            with apply_first_block_cache(transformer, get_config().flux_first_block_cache_threshold):
+            with apply_first_block_cache(
+                transformer, get_config().flux_first_block_cache_threshold, logger=context.logger
+            ):
                 x = denoise(
                     model=transformer,
                     img=x,

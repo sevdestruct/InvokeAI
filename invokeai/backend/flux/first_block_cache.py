@@ -25,6 +25,8 @@ class FluxFirstBlockCache:
 
     def __init__(self, threshold: float) -> None:
         self.threshold = threshold
+        # Number of block-stack evaluations skipped via cache reuse (telemetry).
+        self.reuse_count = 0
         # Per-stream previous first-block residual (drives the "did it change?" test).
         self._prev_first_residual: dict[int, torch.Tensor] = {}
         # Per-stream cached aggregate residual (everything after the first block).
@@ -43,7 +45,10 @@ class FluxFirstBlockCache:
         if not (denom > 0):
             return False
         relative_l1 = ((first_residual - prev).abs().mean() / denom).item()
-        return relative_l1 < self.threshold
+        reuse = relative_l1 < self.threshold
+        if reuse:
+            self.reuse_count += 1
+        return reuse
 
     def update_first_residual(self, stream_key: int, first_residual: torch.Tensor) -> None:
         """Record this step's first-block residual for next step's change test (every step)."""
@@ -55,19 +60,23 @@ class FluxFirstBlockCache:
 
 
 @contextlib.contextmanager
-def apply_first_block_cache(model: torch.nn.Module, threshold: float | None) -> Iterator[None]:
+def apply_first_block_cache(
+    model: torch.nn.Module, threshold: float | None, logger=None
+) -> Iterator[None]:
     """Attach a FluxFirstBlockCache to `model` for the duration of a single denoise run.
 
     No-op (and zero overhead in ``Flux.forward``) when ``threshold`` is falsy or <= 0. The
     cache lives on the private ``_fbcache`` attribute that ``Flux.forward`` checks, and is
     always detached on exit so it never leaks across runs -- every run must start clean.
+    When `logger` is provided, the number of skipped block-stack evaluations is logged.
     """
     if not threshold or threshold <= 0.0:
         yield
         return
 
     previous = getattr(model, "_fbcache", None)
-    model._fbcache = FluxFirstBlockCache(threshold)
+    cache = FluxFirstBlockCache(threshold)
+    model._fbcache = cache
     try:
         yield
     finally:
@@ -76,3 +85,8 @@ def apply_first_block_cache(model: torch.nn.Module, threshold: float | None) -> 
                 delattr(model, "_fbcache")
         else:
             model._fbcache = previous
+        if logger is not None and cache.reuse_count:
+            logger.info(
+                f"FLUX FirstBlockCache (threshold={threshold}): skipped the block stack on "
+                f"{cache.reuse_count} step evaluation(s) by reusing the cached residual."
+            )
