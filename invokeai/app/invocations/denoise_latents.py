@@ -36,6 +36,7 @@ from invokeai.app.invocations.ip_adapter import IPAdapterField
 from invokeai.app.invocations.model import ModelIdentifierField, UNetField
 from invokeai.app.invocations.primitives import LatentsOutput
 from invokeai.app.invocations.t2i_adapter import T2IAdapterField
+from invokeai.app.services.config.config_default import get_config
 from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.app.util.controlnet_utils import prepare_control_image
 from invokeai.backend.ip_adapter.ip_adapter import IPAdapter
@@ -45,6 +46,7 @@ from invokeai.backend.model_patcher import ModelPatcher
 from invokeai.backend.patches.layer_patcher import LayerPatcher
 from invokeai.backend.patches.model_patch_raw import ModelPatchRaw
 from invokeai.backend.stable_diffusion import PipelineIntermediateState
+from invokeai.backend.stable_diffusion.deepcache_ext import apply_deepcache
 from invokeai.backend.stable_diffusion.denoise_context import DenoiseContext, DenoiseInputs
 from invokeai.backend.stable_diffusion.diffusers_pipeline import (
     ControlNetData,
@@ -940,6 +942,18 @@ class DenoiseLatentsInvocation(BaseInvocation):
             # ext: t2i/ip adapter
             ext_manager.run_callback(ExtensionCallbackType.SETUP, denoise_ctx)
 
+            # DeepCache (opt-in, SD/SDXL UNet only). It reuses deep-block outputs across steps, so it is
+            # incompatible with per-step block conditioning (ControlNet / T2I-Adapter / IP-Adapter) and with
+            # sequential guidance (caching assumes one batched UNet call per step) -- disable it in those cases.
+            deepcache_interval = get_config().deepcache_interval
+            if deepcache_interval > 1 and (
+                self.control
+                or self.t2i_adapter
+                or getattr(self, "ip_adapter", None)
+                or get_config().sequential_guidance
+            ):
+                deepcache_interval = 1
+
             with (
                 context.models.load(self.unet.unet).model_on_device() as (cached_weights, unet),
                 ModelPatcher.patch_unet_attention_processor(unet, denoise_ctx.inputs.attention_processor_cls),
@@ -947,6 +961,8 @@ class DenoiseLatentsInvocation(BaseInvocation):
                 ext_manager.patch_extensions(denoise_ctx),
                 # ext: freeu, seamless, ip adapter, lora
                 ext_manager.patch_unet(unet, cached_weights),
+                # DeepCache speedup (innermost: wraps the fully-patched UNet blocks; no-op when interval <= 1)
+                apply_deepcache(unet, scheduler, deepcache_interval),
             ):
                 sd_backend = StableDiffusionBackend(unet, scheduler)
                 denoise_ctx.unet = unet
@@ -1085,22 +1101,29 @@ class DenoiseLatentsInvocation(BaseInvocation):
                 seed=seed,
             )
 
-            result_latents = pipeline.latents_from_embeddings(
-                latents=latents,
-                timesteps=timesteps,
-                init_timestep=init_timestep,
-                noise=noise,
-                seed=seed,
-                mask=mask,
-                masked_latents=masked_latents,
-                is_gradient_mask=gradient_mask,
-                scheduler_step_kwargs=scheduler_step_kwargs,
-                conditioning_data=conditioning_data,
-                control_data=controlnet_data,
-                ip_adapter_data=ip_adapter_data,
-                t2i_adapter_data=t2i_adapter_data,
-                callback=step_callback,
-            )
+            # DeepCache (opt-in, SD/SDXL). Reuses deep-block outputs across steps; incompatible with
+            # per-step block conditioning (ControlNet / T2I-Adapter / IP-Adapter), so disable it then.
+            old_deepcache_interval = get_config().deepcache_interval
+            if old_deepcache_interval > 1 and (controlnet_data or ip_adapter_data or t2i_adapter_data):
+                old_deepcache_interval = 1
+
+            with apply_deepcache(unet, scheduler, old_deepcache_interval):
+                result_latents = pipeline.latents_from_embeddings(
+                    latents=latents,
+                    timesteps=timesteps,
+                    init_timestep=init_timestep,
+                    noise=noise,
+                    seed=seed,
+                    mask=mask,
+                    masked_latents=masked_latents,
+                    is_gradient_mask=gradient_mask,
+                    scheduler_step_kwargs=scheduler_step_kwargs,
+                    conditioning_data=conditioning_data,
+                    control_data=controlnet_data,
+                    ip_adapter_data=ip_adapter_data,
+                    t2i_adapter_data=t2i_adapter_data,
+                    callback=step_callback,
+                )
 
         # https://discuss.huggingface.co/t/memory-usage-by-later-pipeline-stages/23699
         result_latents = result_latents.to("cpu")
