@@ -14,6 +14,7 @@ import {
   selectParamsSlice,
   selectVAEKey,
 } from 'features/controlLayers/store/paramsSlice';
+import { ParamAccelerationMode } from 'features/parameters/components/Advanced/ParamAccelerationMode';
 import ParamAnimaModelSelect from 'features/parameters/components/Advanced/ParamAnimaModelSelect';
 import ParamCFGRescaleMultiplier from 'features/parameters/components/Advanced/ParamCFGRescaleMultiplier';
 import ParamCLIPEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPEmbedModelSelect';
@@ -107,6 +108,13 @@ export const AdvancedSettingsAccordion = memo(() => {
   return (
     <StandaloneAccordion label={t('accordions.advanced.title')} badges={badges} isOpen={isOpen} onToggle={onToggle}>
       <Flex gap={4} alignItems="center" p={4} flexDir="column" data-testid="advanced-settings-accordion">
+        {/* Acceleration (DeepCache / FLUX FirstBlockCache) applies only to the SD1.5/SDXL and FLUX
+            graph builders, which consume the cache override fields. */}
+        {!isFlux2 && !isSD3 && !isZImage && !isQwenImage && !isAnima && (
+          <Flex w="full">
+            <ParamAccelerationMode />
+          </Flex>
+        )}
         {!isZImage && !isAnima && !isFlux2 && !isQwenImage && (
           <Flex gap={4} w="full">
             {isFLUX ? <ParamFLUXVAEModelSelect /> : <ParamVAEModelSelect />}
