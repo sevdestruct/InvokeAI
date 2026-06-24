@@ -207,6 +207,36 @@ export const getInfill = (
   assert(false, 'Unknown infill method');
 };
 
+/**
+ * Translates the user-facing acceleration mode into a DeepCache step interval for SD 1.x / SDXL
+ * `denoise_latents` nodes. 1 disables DeepCache; higher values are faster but lower quality.
+ */
+export const getDeepCacheInterval = (mode: ParamsState['accelerationMode']): number => {
+  switch (mode) {
+    case 'off':
+      return 1;
+    case 'balanced':
+      return 2;
+    case 'max':
+      return 3;
+  }
+};
+
+/**
+ * Translates the user-facing acceleration mode into a FLUX FirstBlockCache threshold for
+ * `flux_denoise` nodes. 0 disables it; higher values are faster but lower quality.
+ */
+export const getFluxFBCacheThreshold = (mode: ParamsState['accelerationMode']): number => {
+  switch (mode) {
+    case 'off':
+      return 0;
+    case 'balanced':
+      return 0.12;
+    case 'max':
+      return 0.2;
+  }
+};
+
 export const CANVAS_OUTPUT_PREFIX = 'canvas_output';
 
 export const isMainModelWithoutUnet = (modelLoader: Invocation<MainModelLoaderNodes>) => {

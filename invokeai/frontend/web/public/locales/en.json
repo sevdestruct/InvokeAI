@@ -1740,6 +1740,10 @@
         "symmetry": "Symmetry",
         "tileSize": "Tile Size",
         "optimizedImageToImage": "Optimized Image-to-Image",
+        "accelerationMode": "Acceleration",
+        "accelerationModeOff": "Off",
+        "accelerationModeBalanced": "Balanced",
+        "accelerationModeMax": "Max",
         "type": "Type",
         "postProcessing": "Post-Processing (Shift + U)",
         "processImage": "Process Image",
@@ -2421,6 +2425,12 @@
             "heading": "Optimized Image-to-Image",
             "paragraphs": [
                 "Enable 'Optimized Image-to-Image' for a more gradual Denoise Strength scale for image-to-image and inpainting transformations with Flux models. This setting improves the ability to control the amount of change applied to an image, but may be turned off if you prefer to use the standard Denoise Strength scale. This setting is still being tuned and is in beta status."
+            ]
+        },
+        "accelerationMode": {
+            "heading": "Acceleration",
+            "paragraphs": [
+                "Trades image quality for faster generation by caching parts of the denoising computation. 'Balanced' speeds up generation with minimal quality loss, while 'Max' is faster but may degrade fine details like faces and hands. Set to 'Off' for the highest quality. Applies to SD 1.x, SDXL, and FLUX models."
             ]
         },
         "cpuOnly": {

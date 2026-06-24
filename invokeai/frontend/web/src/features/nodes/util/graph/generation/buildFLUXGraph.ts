@@ -1,6 +1,7 @@
 import { logger } from 'app/logging/logger';
 import { getPrefixedId } from 'features/controlLayers/konva/util';
 import {
+  selectAccelerationMode,
   selectKleinQwen3EncoderModel,
   selectKleinVaeModel,
   selectMainModelConfig,
@@ -24,7 +25,7 @@ import { addRegions } from 'features/nodes/util/graph/generation/addRegions';
 import { addTextToImage } from 'features/nodes/util/graph/generation/addTextToImage';
 import { addWatermarker } from 'features/nodes/util/graph/generation/addWatermarker';
 import { Graph } from 'features/nodes/util/graph/generation/Graph';
-import { selectCanvasOutputFields } from 'features/nodes/util/graph/graphBuilderUtils';
+import { getFluxFBCacheThreshold, selectCanvasOutputFields } from 'features/nodes/util/graph/graphBuilderUtils';
 import type { GraphBuilderArg, GraphBuilderReturn, ImageOutputNodes } from 'features/nodes/util/graph/types';
 import { UnsupportedGenerationModeError } from 'features/nodes/util/graph/types';
 import { isFlux2KleinQwen3Compatible } from 'features/parameters/util/flux2Klein';
@@ -219,6 +220,7 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
       // Only send custom scale/exponent when DyPE is not off
       dype_scale: fluxDypeScale,
       dype_exponent: fluxDypeExponent,
+      first_block_cache_threshold: getFluxFBCacheThreshold(selectAccelerationMode(state)),
     });
 
     posCondCollect = g.addNode({

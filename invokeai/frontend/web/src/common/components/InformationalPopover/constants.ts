@@ -76,6 +76,7 @@ export type Feature =
   | 'tileSize'
   | 'tileOverlap'
   | 'optimizedDenoising'
+  | 'accelerationMode'
   | 'fluxDevLicense'
   | 'cpuOnly'
   | 'fp8Storage';

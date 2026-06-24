@@ -115,6 +115,9 @@ const slice = createSlice({
     setOptimizedDenoisingEnabled: (state, action: PayloadAction<boolean>) => {
       state.optimizedDenoisingEnabled = action.payload;
     },
+    setAccelerationMode: (state, action: PayloadAction<ParamsState['accelerationMode']>) => {
+      state.accelerationMode = action.payload;
+    },
     setSeamlessXAxis: (state, action: PayloadAction<boolean>) => {
       state.seamlessXAxis = action.payload;
     },
@@ -642,6 +645,7 @@ export const {
   setSeed,
   setImg2imgStrength,
   setOptimizedDenoisingEnabled,
+  setAccelerationMode,
   setSeamlessXAxis,
   setSeamlessYAxis,
   setShouldRandomizeSeed,
@@ -802,6 +806,7 @@ export const selectInfillPatchmatchDownscaleSize = createParamsSelector(
 export const selectInfillColorValue = createParamsSelector((params) => params.infillColorValue);
 export const selectImg2imgStrength = createParamsSelector((params) => params.img2imgStrength);
 export const selectOptimizedDenoisingEnabled = createParamsSelector((params) => params.optimizedDenoisingEnabled);
+export const selectAccelerationMode = createParamsSelector((params) => params.accelerationMode);
 export const selectPositivePrompt = createParamsSelector((params) => params.positivePrompt);
 export const selectNegativePrompt = createParamsSelector((params) => params.negativePrompt);
 export const selectNegativePromptWithFallback = createParamsSelector((params) => params.negativePrompt ?? '');

@@ -10,6 +10,7 @@ import {
   selectShouldRandomizeSeed,
 } from 'features/controlLayers/store/paramsSlice';
 import { selectBbox, selectScaleMethod } from 'features/controlLayers/store/selectors';
+import { ParamAccelerationMode } from 'features/parameters/components/Advanced/ParamAccelerationMode';
 import { ParamOptimizedDenoisingToggle } from 'features/parameters/components/Advanced/ParamOptimizedDenoisingToggle';
 import BboxScaledHeight from 'features/parameters/components/Bbox/BboxScaledHeight';
 import BboxScaledWidth from 'features/parameters/components/Bbox/BboxScaledWidth';
@@ -82,6 +83,7 @@ export const CanvasTabImageSettingsAccordion = memo(() => {
         <Expander label={t('accordions.advanced.options')} isOpen={isOpenExpander} onToggle={onToggleExpander}>
           <Flex gap={4} pb={4} flexDir="column">
             {modelSupportsOptimizedDenoising && <ParamOptimizedDenoisingToggle />}
+            <ParamAccelerationMode />
             <BboxScaleMethod />
             {scaleMethod !== 'none' && (
               <FormControlGroup formLabelProps={scalingLabelProps}>

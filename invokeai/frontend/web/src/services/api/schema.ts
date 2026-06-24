@@ -5145,7 +5145,10 @@ export type components = {
              */
             type: "infill_cv2";
         };
-        /** CacheStats */
+        /**
+         * CacheStats
+         * @description Collect statistics on cache performance.
+         */
         CacheStats: {
             /**
              * Hits
@@ -8344,6 +8347,12 @@ export type components = {
              */
             cfg_rescale_multiplier?: number;
             /**
+             * DeepCache Interval
+             * @description Per-generation override for the DeepCache step interval (SD 1.x / SDXL). Leave unset to use the `deepcache_interval` app setting. 1 disables DeepCache; higher values are faster but reduce quality (fine details like faces/hands degrade first). Ignored with ControlNet / T2I-Adapter / IP-Adapter.
+             * @default null
+             */
+            deepcache_interval?: number | null;
+            /**
              * @description Latents tensor
              * @default null
              */
@@ -8461,6 +8470,12 @@ export type components = {
              * @default 0
              */
             cfg_rescale_multiplier?: number;
+            /**
+             * DeepCache Interval
+             * @description Per-generation override for the DeepCache step interval (SD 1.x / SDXL). Leave unset to use the `deepcache_interval` app setting. 1 disables DeepCache; higher values are faster but reduce quality (fine details like faces/hands degrade first). Ignored with ControlNet / T2I-Adapter / IP-Adapter.
+             * @default null
+             */
+            deepcache_interval?: number | null;
             /**
              * @description Latents tensor
              * @default null
@@ -11046,6 +11061,12 @@ export type components = {
              */
             seed?: number;
             /**
+             * FirstBlockCache Threshold
+             * @description Per-generation override for FLUX FirstBlockCache. Leave unset to use the `flux_first_block_cache_threshold` app setting. 0 disables it; higher values are faster but reduce quality (fine details like faces/hands degrade first; typical 0.05-0.15). Ignored with ControlNet / IP-Adapter.
+             * @default null
+             */
+            first_block_cache_threshold?: number | null;
+            /**
              * Control
              * @description ControlNet models.
              * @default null
@@ -11244,6 +11265,12 @@ export type components = {
              * @default 0
              */
             seed?: number;
+            /**
+             * FirstBlockCache Threshold
+             * @description Per-generation override for FLUX FirstBlockCache. Leave unset to use the `flux_first_block_cache_threshold` app setting. 0 disables it; higher values are faster but reduce quality (fine details like faces/hands degrade first; typical 0.05-0.15). Ignored with ControlNet / IP-Adapter.
+             * @default null
+             */
+            first_block_cache_threshold?: number | null;
             /**
              * Control
              * @description ControlNet models.
@@ -16514,6 +16541,17 @@ export type components = {
              */
             precision?: "auto" | "float16" | "bfloat16" | "float32";
             /**
+             * Mps Enable Fallback
+             * @description On macOS (MPS), set PYTORCH_ENABLE_MPS_FALLBACK=1 so operations not implemented for the MPS backend fall back to CPU instead of raising an error. Improves robustness at the cost of a slow CPU path for those ops.
+             * @default true
+             */
+            mps_enable_fallback?: boolean;
+            /**
+             * Mps High Watermark Ratio
+             * @description On macOS (MPS), sets PYTORCH_MPS_HIGH_WATERMARK_RATIO, which caps total MPS allocations as a ratio of recommended max memory. 0.0 disables the upper limit (use with caution on a shared-memory system). Leave unset to use the PyTorch default.
+             */
+            mps_high_watermark_ratio?: number | null;
+            /**
              * Sequential Guidance
              * @description Whether to calculate guidance in serial instead of in parallel, lowering memory requirements.
              * @default false
@@ -16539,6 +16577,18 @@ export type components = {
              * @default false
              */
             force_tiled_decode?: boolean;
+            /**
+             * Deepcache Interval
+             * @description DeepCache step interval for SD 1.x / SDXL. 1 disables it. Values >1 reuse the deep UNet block outputs for that many steps, recomputing only every Nth step -- measured ~1.8x (interval=2) to ~2.9x (interval=5) faster on Apple Silicon, with a small quality change that grows with the interval. Requires the `DeepCache` package. Automatically disabled with ControlNet/T2I-Adapter or sequential guidance.
+             * @default 1
+             */
+            deepcache_interval?: number;
+            /**
+             * Flux First Block Cache Threshold
+             * @description FLUX FirstBlockCache residual-reuse threshold. 0 disables it. When >0, the denoiser skips the remaining transformer blocks on steps where the first block's output changes by less than this relative-L1 threshold, reusing the previous step's cached residual -- measured ~1.5-2x faster FLUX denoising, with a quality change that grows with the threshold (typical range 0.05-0.15). Automatically disabled with ControlNet or IP-Adapter.
+             * @default 0
+             */
+            flux_first_block_cache_threshold?: number;
             /**
              * Pil Compress Level
              * @description The compress_level setting of PIL.Image.save(), used for PNG encoding. All settings are lossless. 0 = no compression, 1 = fastest with slightly larger filesize, 9 = slowest with smallest filesize. 1 is typically the best setting.
