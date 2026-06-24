@@ -74,7 +74,7 @@ from invokeai.backend.util.devices import TorchDevice
     title="FLUX Denoise",
     tags=["image", "flux"],
     category="latents",
-    version="4.6.0",
+    version="4.7.0",
 )
 class FluxDenoiseInvocation(BaseInvocation):
     """Run denoising process with a FLUX transformer model."""
@@ -159,6 +159,15 @@ class FluxDenoiseInvocation(BaseInvocation):
         description="The guidance strength. Higher values adhere more strictly to the prompt, and will produce less diverse images. FLUX dev only, ignored for schnell.",
     )
     seed: int = InputField(default=0, description="Randomness seed for reproducibility.")
+    first_block_cache_threshold: Optional[float] = InputField(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        title="FirstBlockCache Threshold",
+        description="Per-generation override for FLUX FirstBlockCache. Leave unset to use the "
+        "`flux_first_block_cache_threshold` app setting. 0 disables it; higher values are faster but reduce quality "
+        "(fine details like faces/hands degrade first; typical 0.05-0.15). Ignored with ControlNet / IP-Adapter.",
+    )
     control: FluxControlNetField | list[FluxControlNetField] | None = InputField(
         default=None, input=Input.Connection, description="ControlNet models."
     )
@@ -504,8 +513,13 @@ class FluxDenoiseInvocation(BaseInvocation):
 
             # FLUX FirstBlockCache (opt-in via config; no-op at threshold 0.0). Attaches a
             # per-run residual cache to the transformer for the duration of the denoise loop.
+            fbcache_threshold = (
+                self.first_block_cache_threshold
+                if self.first_block_cache_threshold is not None
+                else get_config().flux_first_block_cache_threshold
+            )
             with apply_first_block_cache(
-                transformer, get_config().flux_first_block_cache_threshold, logger=context.logger
+                transformer, fbcache_threshold, logger=context.logger
             ):
                 x = denoise(
                     model=transformer,

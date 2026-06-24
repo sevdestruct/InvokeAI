@@ -132,7 +132,7 @@ def get_scheduler(
     title="Denoise - SD1.5, SDXL",
     tags=["latents", "denoise", "txt2img", "t2i", "t2l", "img2img", "i2i", "l2l"],
     category="latents",
-    version="1.5.4",
+    version="1.5.5",
 )
 class DenoiseLatentsInvocation(BaseInvocation):
     """Denoises noisy latents to decodable images"""
@@ -192,6 +192,14 @@ class DenoiseLatentsInvocation(BaseInvocation):
     )
     cfg_rescale_multiplier: float = InputField(
         title="CFG Rescale Multiplier", default=0, ge=0, lt=1, description=FieldDescriptions.cfg_rescale_multiplier
+    )
+    deepcache_interval: Optional[int] = InputField(
+        default=None,
+        ge=1,
+        title="DeepCache Interval",
+        description="Per-generation override for the DeepCache step interval (SD 1.x / SDXL). Leave unset to use the "
+        "`deepcache_interval` app setting. 1 disables DeepCache; higher values are faster but reduce quality "
+        "(fine details like faces/hands degrade first). Ignored with ControlNet / T2I-Adapter / IP-Adapter.",
     )
     latents: Optional[LatentsField] = InputField(
         default=None,
@@ -945,7 +953,10 @@ class DenoiseLatentsInvocation(BaseInvocation):
             # DeepCache (opt-in, SD/SDXL UNet only). It reuses deep-block outputs across steps, so it is
             # incompatible with per-step block conditioning (ControlNet / T2I-Adapter / IP-Adapter) and with
             # sequential guidance (caching assumes one batched UNet call per step) -- disable it in those cases.
-            deepcache_interval = get_config().deepcache_interval
+            # A per-generation field overrides the app setting when provided.
+            deepcache_interval = (
+                self.deepcache_interval if self.deepcache_interval is not None else get_config().deepcache_interval
+            )
             if deepcache_interval > 1 and (
                 self.control
                 or self.t2i_adapter
@@ -1103,7 +1114,10 @@ class DenoiseLatentsInvocation(BaseInvocation):
 
             # DeepCache (opt-in, SD/SDXL). Reuses deep-block outputs across steps; incompatible with
             # per-step block conditioning (ControlNet / T2I-Adapter / IP-Adapter), so disable it then.
-            old_deepcache_interval = get_config().deepcache_interval
+            # A per-generation field overrides the app setting when provided.
+            old_deepcache_interval = (
+                self.deepcache_interval if self.deepcache_interval is not None else get_config().deepcache_interval
+            )
             if old_deepcache_interval > 1 and (controlnet_data or ip_adapter_data or t2i_adapter_data):
                 old_deepcache_interval = 1
 
