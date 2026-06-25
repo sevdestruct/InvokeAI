@@ -193,6 +193,10 @@ def parse_log_tail(text: str) -> dict:
 
 def run_one(arch: str, models: list[dict], cfg: dict, pos: str, neg: str, field_val, out_dir: str, tag: str) -> dict:
     graph = build_graph(arch, models, cfg, pos, neg, field_val)
+    # Disable InvokeAI's node-output cache so every run actually recomputes -- otherwise repeat runs
+    # with the same seed/graph return stale cached results (instant, identical) and corrupt the A/B.
+    for node in graph["nodes"].values():
+        node["use_cache"] = False
     log_off = os.path.getsize(SERVER_LOG) if os.path.exists(SERVER_LOG) else 0
     r = requests.post(f"{API}/api/v1/queue/default/enqueue_batch",
                       json={"prepend": False, "batch": {"graph": graph, "runs": 1}}, timeout=30)
@@ -251,6 +255,8 @@ def main() -> None:
     ap.add_argument("--arch", default="sdxl", help="comma list of sd-1,sdxl,flux")
     ap.add_argument("--prompts", default="portrait,scene", help="comma list of prompt keys")
     ap.add_argument("--fast", action="store_true", help="fewer steps for a quick smoke run")
+    ap.add_argument("--perceptual", action="store_true", help="also compute the VGG perceptual distance (downloads ~528MB weights on first use)")
+    ap.add_argument("--grid", type=int, default=8, help="tiled-deviation grid size")
     args = ap.parse_args()
 
     archs = [a.strip() for a in args.arch.split(",") if a.strip()]
@@ -291,33 +297,52 @@ def main() -> None:
                     rec["speedup"] = 1.0
                     rec["verdict"] = verdict(1.0, None)
                 else:
-                    q = M.compare(ref_img, arr, heatmap_path=os.path.join(out_dir, f"{tag}_diff.png")) if ref_img is not None else None
+                    q = (
+                        M.compare(
+                            ref_img, arr,
+                            heatmap_path=os.path.join(out_dir, f"{tag}_diff.png"),
+                            tilemap_path=os.path.join(out_dir, f"{tag}_tiles.png"),
+                            triptych_path=os.path.join(out_dir, f"{tag}_triptych.png"),
+                            grid=args.grid,
+                            perceptual=args.perceptual,
+                        )
+                        if ref_img is not None
+                        else None
+                    )
                     speedup = (ref_time / res["wall"]) if ref_time else 1.0
                     rec["speedup"] = round(speedup, 2)
                     rec["quality"] = q.to_dict() if q else None
                     rec["verdict"] = verdict(speedup, q)
                 den = res["stages"].get("flux_denoise") or res["stages"].get("denoise_latents")
                 rec["denoise_s"] = den
+                q = rec.get("quality") or {}
                 print(f"    wall={res['wall']}s denoise={den}s skips={res.get('skips')} "
-                      f"speedup={rec.get('speedup')} ssim={(rec.get('quality') or {}).get('ssim')} -> {rec['verdict']}")
+                      f"speedup={rec.get('speedup')} ssim={q.get('ssim')} gmsd={q.get('gmsd')} "
+                      f"tiledMax%={q.get('tiled_max_dev_pct')} -> {rec['verdict']}")
                 emit(rec)
     jsonl.close()
     write_ledger(out_dir, rows)
+    write_html(out_dir, rows)
     print(f"\n=== arbiter complete -> {out_dir} ===")
     print(f"ledger: {os.path.join(out_dir, 'ledger.md')}")
+    print(f"gallery (open in browser): {os.path.join(out_dir, 'report.html')}")
 
 
 def write_ledger(out_dir: str, rows: list[dict]) -> None:
-    lines = ["# Performance Arbiter Ledger", "", f"Runs: {len(rows)}  |  dir: `{out_dir}`", ""]
-    lines += ["| arch | prompt | exp | field=val | wall(s) | denoise(s) | speedup | SSIM | faceSSIM | MAD% | sharp ratio | skips | peakGB | verdict |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines = ["# Performance Arbiter Ledger", "", f"Runs: {len(rows)}  |  dir: `{out_dir}`", "",
+             "Quality columns are **deviation from the off-reference**, not absolute quality. "
+             "GMSD = texture/edge distortion (higher = more skin/detail change, the most sensitive "
+             "to realism loss); MAD% = mean pixel diff; tiledMax% = worst regional change; "
+             "perceptual = VGG/LPIPS-like distance (when --perceptual).", ""]
+    lines += ["| arch | prompt | exp | field=val | wall(s) | denoise(s) | speedup | SSIM | GMSD | tiledMax% | MAD% | sharpR | faceSSIM | percep | verdict |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         q = r.get("quality") or {}
         lines.append(
             f"| {r['arch']} | {r['prompt']} | {r['experiment']} | {r['field']}={r['value']} | "
             f"{r.get('wall','')} | {r.get('denoise_s','')} | {r.get('speedup','')} | "
-            f"{q.get('ssim','')} | {q.get('face_region_ssim','')} | {q.get('mean_abs_diff_pct','')} | "
-            f"{q.get('sharpness_ratio','')} | {r.get('skips','')} | {r.get('peak_cache_gb','')} | {r.get('verdict','')} |"
+            f"{q.get('ssim','')} | {q.get('gmsd','')} | {q.get('tiled_max_dev_pct','')} | {q.get('mean_abs_diff_pct','')} | "
+            f"{q.get('sharpness_ratio','')} | {q.get('face_region_ssim','')} | {q.get('perceptual_vgg','')} | {r.get('verdict','')} |"
         )
     # gallery
     lines += ["", "## Gallery (reference | variant | diff heatmap)", ""]
@@ -337,6 +362,53 @@ def write_ledger(out_dir: str, rows: list[dict]) -> None:
         lines.append("")
     with open(os.path.join(out_dir, "ledger.md"), "w") as f:
         f.write("\n".join(lines))
+
+
+def write_html(out_dir: str, rows: list[dict]) -> None:
+    """Self-contained HTML gallery: per (arch,prompt), each variant's [ref|var|diff] triptych + tile
+    map + a metrics row. Open report.html in a browser to A/B/C by eye AND by numbers in one place."""
+    css = (
+        "body{font:14px -apple-system,system-ui,sans-serif;background:#111;color:#eee;margin:24px}"
+        "h2{border-bottom:1px solid #444;padding-bottom:4px;margin-top:32px}"
+        "img{max-width:100%;border:1px solid #333;border-radius:6px;display:block;margin:6px 0}"
+        ".v{margin:18px 0;padding:12px;background:#1b1b1b;border-radius:8px}"
+        "table{border-collapse:collapse;margin:6px 0}td,th{border:1px solid #333;padding:3px 8px;font-size:12px}"
+        ".pass{color:#5cd65c}.warn{color:#ffcc44}.fail{color:#ff5c5c}.base{color:#88aaff}"
+        ".note{color:#aaa;font-size:12px}"
+    )
+    h = [f"<!doctype html><meta charset=utf8><title>Perf Arbiter</title><style>{css}</style>",
+         "<h1>Performance Arbiter — visual + empirical A/B</h1>",
+         "<p class=note>Each row: <b>left</b>=acceleration off (reference), <b>middle</b>=variant, "
+         "<b>right</b>=abs-diff heatmap (bright=more change). The tile map shows per-region change %. "
+         "Metrics are <b>deviation</b> from off, not absolute quality — GMSD is the texture/realism "
+         "signal; sharpR&lt;1 = softer than reference.</p>"]
+    by: dict = {}
+    for r in rows:
+        by.setdefault((r["arch"], r["prompt"]), []).append(r)
+    for (arch, pk), rs in by.items():
+        h.append(f"<h2>{arch} — {pk}</h2>")
+        for r in rs:
+            if "img_path" not in r:
+                continue
+            tag = os.path.basename(r["img_path"]).replace(".png", "")
+            q = r.get("quality") or {}
+            vcls = "base" if r["experiment"] == "off" else ("pass" if r["verdict"].startswith("PASS") else ("fail" if "FAIL" in r["verdict"] else "warn"))
+            h.append("<div class=v>")
+            h.append(f"<b>{r['experiment']}</b> ({r['field']}={r['value']}) — "
+                     f"speedup <b>{r.get('speedup','-')}×</b>, <span class={vcls}>{r['verdict']}</span>")
+            if r["experiment"] == "off":
+                h.append(f"<img src='{tag}.png' style='max-width:360px'>")
+            else:
+                h.append(f"<table><tr><th>speedup<th>SSIM<th>GMSD<th>tiledMax%<th>MAD%<th>sharpR<th>faceSSIM<th>percep</tr>"
+                         f"<tr><td>{r.get('speedup','')}<td>{q.get('ssim','')}<td>{q.get('gmsd','')}"
+                         f"<td>{q.get('tiled_max_dev_pct','')}<td>{q.get('mean_abs_diff_pct','')}"
+                         f"<td>{q.get('sharpness_ratio','')}<td>{q.get('face_region_ssim','')}"
+                         f"<td>{q.get('perceptual_vgg','')}</tr></table>")
+                h.append(f"<img src='{tag}_triptych.png'>")
+                h.append(f"<img src='{tag}_tiles.png' style='max-width:360px' title='per-region change %'>")
+            h.append("</div>")
+    with open(os.path.join(out_dir, "report.html"), "w") as f:
+        f.write("\n".join(h))
 
 
 if __name__ == "__main__":
