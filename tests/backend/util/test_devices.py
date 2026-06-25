@@ -8,7 +8,13 @@ import pytest
 import torch
 
 from invokeai.app.services.config import get_config
-from invokeai.backend.util.devices import TorchDevice, choose_precision, choose_torch_device, torch_dtype
+from invokeai.backend.util.devices import (
+    TorchDevice,
+    _apple_gpu_name,
+    choose_precision,
+    choose_torch_device,
+    torch_dtype,
+)
 
 devices = ["cpu", "cuda:0", "cuda:1", "cuda:2", "mps"]
 device_types_cpu = [("cpu", torch.float32), ("cuda:0", torch.float32), ("mps", torch.float32)]
@@ -169,3 +175,21 @@ def test_choose_anima_inference_dtype_auto_delegates_to_safe_dtype():
         result = TorchDevice.choose_anima_inference_dtype(device)
     assert result is sentinel
     mock_safe.assert_called_once_with(device)
+
+
+def test_apple_gpu_name_is_friendly_and_labels_mps():
+    """The Apple GPU label is always a non-empty string that identifies it as the Metal/MPS GPU,
+    so logs never read as 'no GPU'. (Falls back gracefully if the chip lookup fails.)"""
+    name = _apple_gpu_name()
+    assert isinstance(name, str) and name
+    assert "MPS" in name or "Metal" in name
+
+
+def test_get_torch_device_name_friendly_on_mps():
+    """On MPS, get_torch_device_name returns the friendly Apple label rather than the bare 'MPS'."""
+    with (
+        patch("invokeai.backend.util.devices.platform.system", return_value="Darwin"),
+        patch.object(TorchDevice, "choose_torch_device", return_value=torch.device("mps")),
+        patch("invokeai.backend.util.devices._apple_gpu_name", return_value="Apple M9 Ultra GPU (Metal/MPS)"),
+    ):
+        assert TorchDevice.get_torch_device_name() == "Apple M9 Ultra GPU (Metal/MPS)"

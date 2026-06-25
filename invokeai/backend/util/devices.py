@@ -1,9 +1,32 @@
+import functools
+import platform
+import subprocess
 from typing import Dict, Literal, Optional, Union
 
 import torch
 from deprecated import deprecated
 
 from invokeai.app.services.config.config_default import get_config
+
+
+@functools.lru_cache(maxsize=1)
+def _apple_gpu_name() -> str:
+    """Friendly name for the Apple Silicon GPU (e.g. 'Apple M3 Max GPU'), for clearer logging.
+
+    The PyTorch MPS backend exposes no device name, so InvokeAI otherwise logs the bare device
+    type ('MPS'), which users frequently mistake for 'no GPU'. We read the chip brand string and
+    label it as the GPU it is. Falls back gracefully if the lookup fails.
+    """
+    try:
+        chip = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            capture_output=True, text=True, timeout=2, check=True,
+        ).stdout.strip()
+        if chip:
+            return f"{chip} GPU (Metal/MPS)"
+    except Exception:
+        pass
+    return "Apple Silicon GPU (Metal/MPS)"
 
 # legacy APIs
 TorchPrecisionNames = Literal["float32", "float16", "bfloat16"]
@@ -91,7 +114,11 @@ class TorchDevice:
     def get_torch_device_name(cls) -> str:
         """Return the device name for the current torch device."""
         device = cls.choose_torch_device()
-        return torch.cuda.get_device_name(device) if device.type == "cuda" else device.type.upper()
+        if device.type == "cuda":
+            return torch.cuda.get_device_name(device)
+        if device.type == "mps" and platform.system() == "Darwin":
+            return _apple_gpu_name()
+        return device.type.upper()
 
     @classmethod
     def normalize(cls, device: Union[str, torch.device]) -> torch.device:
