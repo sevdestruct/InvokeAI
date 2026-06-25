@@ -151,3 +151,39 @@ def test_fbcache_bypassed_with_ip_adapter():
     # IP-Adapter injects per-block conditioning -> the cache branch must never be taken.
     assert cache.reuse_count == 0
     assert ip[0].called  # confirms the full (non-cached) block path actually ran
+
+
+# --- error-bounded (TeaCache/MagCache-style) mode -----------------------------------------
+
+
+def _drive(cache, residuals, key=0):
+    """Feed a sequence of first-block residuals; return the reuse decision per step."""
+    decisions = []
+    for r in residuals:
+        decisions.append(cache.should_reuse(key, r))
+        cache.update_first_residual(key, r)
+    return decisions
+
+
+def test_error_budget_bounds_consecutive_skips():
+    # Doubling residuals -> a constant relative-L1 change of 1.0 per step, so the accumulator grows
+    # by ~1.0 each step and must trip the budget on a bounded cadence (not skip forever).
+    cache = FluxFirstBlockCache(threshold=0.0, error_budget=2.5)
+    base = torch.ones(4)
+    seq = [base * (2**i) for i in range(6)]  # 1,2,4,8,16,32
+    decisions = _drive(cache, seq)
+    # step0 has no prev -> False; accum reaches 2.5 after ~3 skips -> a forced recompute resets it.
+    assert decisions[0] is False
+    assert any(decisions), "should skip at least once under the budget"
+    assert not all(decisions[1:]), "must force a recompute once the budget is exceeded (bounded drift)"
+    # And it should resume skipping after the reset (bounded cadence, not a one-shot).
+    assert decisions[1:].count(True) >= 3
+
+
+def test_error_budget_zero_falls_back_to_threshold():
+    # error_budget=0 -> instantaneous-threshold behavior unchanged.
+    cache = FluxFirstBlockCache(threshold=0.1, error_budget=0.0)
+    base = torch.ones(4)
+    # identical residual -> relative_l1 == 0 < 0.1 -> reuse after first.
+    decisions = _drive(cache, [base, base.clone(), base.clone()])
+    assert decisions == [False, True, True]

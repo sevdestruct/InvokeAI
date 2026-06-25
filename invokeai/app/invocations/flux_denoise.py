@@ -74,7 +74,7 @@ from invokeai.backend.util.devices import TorchDevice
     title="FLUX Denoise",
     tags=["image", "flux"],
     category="latents",
-    version="4.7.0",
+    version="4.8.0",
 )
 class FluxDenoiseInvocation(BaseInvocation):
     """Run denoising process with a FLUX transformer model."""
@@ -167,6 +167,15 @@ class FluxDenoiseInvocation(BaseInvocation):
         description="Per-generation override for FLUX FirstBlockCache. Leave unset to use the "
         "`flux_first_block_cache_threshold` app setting. 0 disables it; higher values are faster but reduce quality "
         "(fine details like faces/hands degrade first; typical 0.05-0.15). Ignored with ControlNet / IP-Adapter.",
+    )
+    first_block_cache_error_budget: Optional[float] = InputField(
+        default=None,
+        ge=0.0,
+        title="FirstBlockCache Error Budget",
+        description="Per-generation override for the error-bounded FirstBlockCache mode (TeaCache/MagCache "
+        "family). Leave unset to use the `flux_first_block_cache_error_budget` app setting. 0 uses the plain "
+        "threshold; >0 accumulates the first-block change and recomputes once it exceeds this budget, bounding "
+        "drift across consecutive skips (typical 0.1-0.4). Takes precedence over the threshold when set.",
     )
     control: FluxControlNetField | list[FluxControlNetField] | None = InputField(
         default=None, input=Input.Connection, description="ControlNet models."
@@ -511,15 +520,20 @@ class FluxDenoiseInvocation(BaseInvocation):
             else:
                 context.logger.debug(f"DyPE disabled: resolution={self.width}x{self.height}, preset={self.dype_preset}")
 
-            # FLUX FirstBlockCache (opt-in via config; no-op at threshold 0.0). Attaches a
-            # per-run residual cache to the transformer for the duration of the denoise loop.
+            # FLUX FirstBlockCache (opt-in via config; no-op when both threshold and error_budget are 0).
+            # Attaches a per-run residual cache to the transformer for the duration of the denoise loop.
             fbcache_threshold = (
                 self.first_block_cache_threshold
                 if self.first_block_cache_threshold is not None
                 else get_config().flux_first_block_cache_threshold
             )
+            fbcache_error_budget = (
+                self.first_block_cache_error_budget
+                if self.first_block_cache_error_budget is not None
+                else get_config().flux_first_block_cache_error_budget
+            )
             with apply_first_block_cache(
-                transformer, fbcache_threshold, logger=context.logger
+                transformer, fbcache_threshold, error_budget=fbcache_error_budget, logger=context.logger
             ):
                 x = denoise(
                     model=transformer,
