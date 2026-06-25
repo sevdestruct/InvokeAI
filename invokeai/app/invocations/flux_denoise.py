@@ -48,6 +48,7 @@ from invokeai.backend.flux.extensions.xlabs_controlnet_extension import XLabsCon
 from invokeai.backend.flux.extensions.xlabs_ip_adapter_extension import XLabsIPAdapterExtension
 from invokeai.backend.flux.first_block_cache import apply_first_block_cache
 from invokeai.backend.flux.ip_adapter.xlabs_ip_adapter_flux import XlabsIpAdapterFlux
+from invokeai.backend.flux.math import configure_flux_flash_attention
 from invokeai.backend.flux.model import Flux
 from invokeai.backend.flux.sampling_utils import (
     clip_timestep_schedule_fractional,
@@ -532,6 +533,10 @@ class FluxDenoiseInvocation(BaseInvocation):
                 if self.first_block_cache_error_budget is not None
                 else get_config().flux_first_block_cache_error_budget
             )
+            # Experimental fused flash-attention for unmasked sites (no-op unless enabled + a vetted
+            # MPS kernel is installed; safe by construction).
+            configure_flux_flash_attention(get_config().flux_flash_attention, logger=context.logger)
+
             with apply_first_block_cache(
                 transformer, fbcache_threshold, error_budget=fbcache_error_budget, logger=context.logger
             ):
