@@ -8,8 +8,14 @@ from torch import Tensor
 def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor, attn_mask: Tensor | None = None) -> Tensor:
     q, k = apply_rope(q, k, pe)
 
+    # apply_rope's view()-based reconstruction can leave q/k non-contiguous, which pushes the MPS
+    # SDPA kernel onto a slower path; a contiguous Q/K keeps it on the fast path. Behavior-preserving.
+    q, k = q.contiguous(), k.contiguous()
+
     x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
-    x = rearrange(x, "B H L D -> B L (H D)")
+    # Native transpose+reshape (equivalent to einops "B H L D -> B L (H D)"), avoids the einops call
+    # in the per-block hot path.
+    x = x.transpose(1, 2).reshape(x.shape[0], x.shape[2], -1)
 
     return x
 
